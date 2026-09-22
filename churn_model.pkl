@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Customer Churn Prediction</title>
+</head>
+
+<body>
+
+<h2>Customer Churn Prediction</h2>
+
+<form action="/predict" method="POST">
+
+<input type="number" name="feature1" placeholder="Feature 1" required><br><br>
+
+<input type="number" name="feature2" placeholder="Feature 2" required><br><br>
+
+<input type="number" name="feature3" placeholder="Feature 3" required><br><br>
+
+<input type="number" name="feature4" placeholder="Feature 4" required><br><br>
+
+<input type="submit" value="Predict">
+
+</form>
+
+<h3>{{ prediction }}</h3>
+
+</body>
+
+</html>

@@ -1,0 +1,189 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+    font-family: 'Inter', sans-serif;
+  }
+
+  body {
+    @apply bg-gray-950 text-gray-100 antialiased;
+  }
+
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    @apply bg-gray-900;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply bg-gray-700 rounded-full;
+    border: 2px solid transparent;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-gray-600;
+  }
+
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: #374151 #111827;
+  }
+}
+
+@layer components {
+  .gradient-text {
+    @apply bg-clip-text text-transparent;
+    background-image: linear-gradient(135deg, #2563EB, #4F46E5, #06B6D4);
+  }
+
+  .glass {
+    @apply bg-white/5 backdrop-blur-xl border border-white/10 shadow-xl;
+  }
+
+  .glass-dark {
+    @apply bg-gray-900/60 backdrop-blur-xl border border-white/10 shadow-2xl;
+  }
+
+  .bg-gradient-primary {
+    background-image: linear-gradient(135deg, #2563EB, #4F46E5);
+  }
+
+  .bg-gradient-primary-hover {
+    background-image: linear-gradient(135deg, #1D4ED8, #4338CA);
+  }
+
+  .bg-gradient-secondary {
+    background-image: linear-gradient(135deg, #4F46E5, #06B6D4);
+  }
+
+  .bg-gradient-mesh {
+    background-color: #0f172a;
+    background-image:
+      radial-gradient(at 20% 20%, rgba(37, 99, 235, 0.15) 0, transparent 50%),
+      radial-gradient(at 80% 10%, rgba(79, 70, 229, 0.12) 0, transparent 50%),
+      radial-gradient(at 50% 80%, rgba(6, 182, 212, 0.1) 0, transparent 50%);
+  }
+}
+
+@layer utilities {
+  .animate-pulse-slow {
+    animation: pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  }
+
+  .animate-slide-in {
+    animation: slideIn 0.5s ease-out forwards;
+  }
+
+  .animate-slide-in-left {
+    animation: slideInLeft 0.5s ease-out forwards;
+  }
+
+  .animate-slide-in-right {
+    animation: slideInRight 0.5s ease-out forwards;
+  }
+
+  .animate-fade-in {
+    animation: fadeIn 0.6s ease-out forwards;
+  }
+
+  .animate-fade-in-up {
+    animation: fadeInUp 0.6s ease-out forwards;
+  }
+
+  .animate-scale-in {
+    animation: scaleIn 0.3s ease-out forwards;
+  }
+
+  .animate-loading-spinner {
+    animation: spin 0.8s linear infinite;
+  }
+
+  .animate-float {
+    animation: float 6s ease-in-out infinite;
+  }
+
+  .delay-100 { animation-delay: 100ms; }
+  .delay-200 { animation-delay: 200ms; }
+  .delay-300 { animation-delay: 300ms; }
+  .delay-500 { animation-delay: 500ms; }
+}
+
+@keyframes slideIn {
+  from { opacity: 0; transform: translateY(20px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slideInLeft {
+  from { opacity: 0; transform: translateX(-30px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes slideInRight {
+  from { opacity: 0; transform: translateX(30px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(30px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes scaleIn {
+  from { opacity: 0; transform: scale(0.95); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0px); }
+  50%      { transform: translateY(-20px); }
+}
+
+/* Toast overrides */
+.Toastify__toast {
+  @apply rounded-lg !important;
+}
+
+.Toastify__toast--success {
+  @apply bg-emerald-500/10 border border-emerald-500/20 !important;
+}
+
+.Toastify__toast--error {
+  @apply bg-red-500/10 border border-red-500/20 !important;
+}
+
+.Toastify__toast--info {
+  @apply bg-blue-500/10 border border-blue-500/20 !important;
+}
+
+/* Dark mode support */
+@media (prefers-color-scheme: dark) {
+  .auto-dark {
+    @apply bg-gray-900 text-gray-100;
+  }
+}
+
+/* Responsive utilities */
+@media (max-width: 640px) {
+  .mobile-full-width {
+    @apply w-full px-4;
+  }
+
+  .mobile-stack {
+    @apply flex flex-col;
+  }
+}
