@@ -17,6 +17,7 @@ from sklearn.preprocessing import LabelEncoder, StandardScaler
 from sklearn.model_selection import train_test_split
 import json
 import os
+import io
 
 # Known post-outcome / leakage columns that must never appear in features.
 LEAKAGE_COLUMNS = {
@@ -40,6 +41,41 @@ def load_dataset(file_path):
         df = pd.read_excel(file_path)
     else:
         raise ValueError(f"Unsupported file format: {ext}")
+    return df
+
+
+def load_dataset_from_bytes(file_bytes, ext):
+    """
+    Load a dataset entirely from in-memory bytes — no disk I/O.
+    Works on read-only deployment filesystems.
+
+    Parameters
+    ----------
+    file_bytes : bytes
+        Raw bytes of the uploaded file.
+    ext : str
+        File extension including the dot, e.g. '.csv', '.xlsx'.
+
+    Returns
+    -------
+    pd.DataFrame
+    """
+    ext = ext.lower()
+    buf = io.BytesIO(file_bytes)
+    if ext == '.csv':
+        try:
+            df = pd.read_csv(buf)
+        except Exception as e:
+            raise ValueError(f"Failed to parse CSV: {e}") from e
+    elif ext in ('.xlsx', '.xls'):
+        try:
+            df = pd.read_excel(buf)
+        except Exception as e:
+            raise ValueError(f"Failed to parse Excel file: {e}") from e
+    else:
+        raise ValueError(f"Unsupported file format '{ext}'. Only CSV and Excel are supported.")
+    if df.empty:
+        raise ValueError("The uploaded file contains no data rows.")
     return df
 
 

@@ -1,6 +1,9 @@
 import os
+import io
+import gzip
 import json
 import uuid
+import sqlite3
 from werkzeug.utils import secure_filename
 import functools
 from datetime import datetime, timedelta
@@ -10,7 +13,10 @@ from werkzeug.security import generate_password_hash, check_password_hash
 import jwt
 
 from database import get_db, log_activity
-from preprocess import load_dataset, get_dataset_info, detect_target_column, preprocess_data, encode_single_input
+from preprocess import (
+    load_dataset_from_bytes, get_dataset_info, detect_target_column,
+    preprocess_data, encode_single_input,
+)
 from model import (
     ALGORITHMS, train_model, evaluate_model, compare_all_algorithms,
     save_model, load_model, predict_single
@@ -20,12 +26,6 @@ from utils import generate_pdf_report, generate_csv_report, generate_excel_repor
 api = Blueprint('api', __name__)
 
 SECRET_KEY = os.environ.get('JWT_SECRET', 'churn-prediction-secret-key-2024')
-# Resolve a writable upload directory.
-# Priority: UPLOAD_DIR env var → /tmp/uploads (serverless) → local ../uploads fallback.
-_LOCAL_UPLOAD = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'uploads')
-UPLOAD_DIR = os.environ.get('UPLOAD_DIR') or (
-    '/tmp/uploads' if os.path.exists('/tmp') else _LOCAL_UPLOAD
-)
 
 
 def token_required(f):
@@ -274,59 +274,90 @@ def dashboard(current_user):
 @api.route('/upload', methods=['POST'])
 @token_required
 def upload_dataset(current_user):
+    """
+    Accept a CSV/Excel upload and process it entirely in-memory.
+    No file is written to the application filesystem, making this
+    compatible with read-only deployment environments (e.g. Vercel, AWS Lambda).
+    """
     if 'file' not in request.files:
         return jsonify({'error': 'No file provided'}), 400
 
     file = request.files['file']
-    if file.filename == '':
+    if not file or file.filename == '':
         return jsonify({'error': 'No file selected'}), 400
 
     ext = os.path.splitext(file.filename)[1].lower()
     if ext not in ('.csv', '.xlsx', '.xls'):
         return jsonify({'error': 'Only CSV and Excel files are supported'}), 400
 
-    # Ensure the upload directory exists (created per-request so boot never crashes).
-    try:
-        os.makedirs(UPLOAD_DIR, exist_ok=True)
-    except OSError as e:
-        return jsonify({'error': f'Upload directory unavailable: {str(e)}'}), 500
-
-    # Sanitize original filename and give the stored file a UUID-based name.
     safe_original = secure_filename(file.filename) or 'upload'
-    filename = f"{uuid.uuid4().hex}{ext}"
-    file_path = os.path.join(UPLOAD_DIR, filename)
+    unique_name = f"{uuid.uuid4().hex}{ext}"
 
+    # --- Read upload bytes in-memory (no disk write) ---
     try:
-        file.save(file_path)
-    except OSError as e:
-        return jsonify({'error': f'Failed to save uploaded file: {str(e)}'}), 500
-
-    try:
-        df = load_dataset(file_path)
-        info = get_dataset_info(df)
+        file_bytes = file.read()
     except Exception as e:
-        try:
-            os.remove(file_path)
-        except OSError:
-            pass
-        return jsonify({'error': f'Failed to process file: {str(e)}'}), 400
+        return jsonify({'error': f'Failed to read uploaded file: {str(e)}'}), 400
 
+    if not file_bytes:
+        return jsonify({'error': 'Uploaded file is empty'}), 400
+
+    # --- Parse DataFrame in-memory ---
+    try:
+        df = load_dataset_from_bytes(file_bytes, ext)
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+    except Exception as e:
+        return jsonify({'error': f'Failed to parse file: {str(e)}'}), 400
+
+    # --- Compute dataset info & target column ---
+    try:
+        info = get_dataset_info(df)
+        target_col = detect_target_column(df)
+    except Exception as e:
+        return jsonify({'error': f'Dataset analysis failed: {str(e)}'}), 400
+
+    # --- Compress CSV bytes for storage in the DB ---
+    # Always store as CSV regardless of original format so reconstruction is simple.
+    try:
+        csv_buf = io.BytesIO()
+        df.to_csv(csv_buf, index=False)
+        csv_bytes = gzip.compress(csv_buf.getvalue())
+    except Exception as e:
+        return jsonify({'error': f'Failed to compress dataset for storage: {str(e)}'}), 500
+
+    # --- Persist to database ---
     conn = get_db()
-    target_col = detect_target_column(df)
-
-    cursor = conn.execute('''
-        INSERT INTO datasets (user_id, filename, original_filename, file_path, rows_count,
-            columns_count, column_names, missing_values, duplicate_values, target_column, file_size)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ''', (
-        current_user['id'], filename, safe_original, file_path,
-        info['rows'], info['columns'], json.dumps(info['column_names']),
-        info['missing_values'], info['duplicate_values'], target_col,
-        os.path.getsize(file_path)
-    ))
-    dataset_id = cursor.lastrowid
-    conn.commit()
-    conn.close()
+    try:
+        cursor = conn.execute('''
+            INSERT INTO datasets (
+                user_id, filename, original_filename, file_path,
+                rows_count, columns_count, column_names,
+                missing_values, duplicate_values, target_column,
+                file_size, csv_data, column_dtypes, head_data
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            current_user['id'],
+            unique_name,
+            safe_original,
+            '',                                   # file_path unused — data lives in csv_data
+            info['rows'],
+            info['columns'],
+            json.dumps(info['column_names']),
+            info['missing_values'],
+            info['duplicate_values'],
+            target_col,
+            round(len(file_bytes) / 1024, 2),    # original size in KB
+            sqlite3.Binary(csv_bytes),            # compressed CSV blob
+            json.dumps(info['dtypes']),
+            json.dumps(info['head']),
+        ))
+        dataset_id = cursor.lastrowid
+        conn.commit()
+    except Exception as e:
+        return jsonify({'error': f'Failed to save dataset metadata: {str(e)}'}), 500
+    finally:
+        conn.close()
 
     log_activity(current_user['id'], 'upload_dataset', f'Uploaded {safe_original}')
 
@@ -362,14 +393,18 @@ def get_dataset(current_user):
 
     ds = dict(dataset)
     ds['column_names'] = json.loads(ds['column_names']) if ds['column_names'] else []
+    # Remove raw blob from response payload
+    ds.pop('csv_data', None)
 
-    try:
-        df = load_dataset(ds['file_path'])
-        info = get_dataset_info(df)
-        ds['dtypes'] = info['dtypes']
-        ds['head'] = info['head']
-    except Exception:
+    # Serve dtypes and head from stored JSON (no disk read required)
+    if ds.get('column_dtypes'):
+        ds['dtypes'] = json.loads(ds['column_dtypes'])
+    else:
         ds['dtypes'] = {}
+
+    if ds.get('head_data'):
+        ds['head'] = json.loads(ds['head_data'])
+    else:
         ds['head'] = []
 
     return jsonify({'dataset': ds})
@@ -388,9 +423,11 @@ def delete_dataset(current_user):
         conn.close()
         return jsonify({'error': 'No dataset found'}), 404
 
+    # Best-effort: remove any legacy file that may exist on disk (old uploads before this fix).
     try:
-        if os.path.exists(dataset['file_path']):
-            os.remove(dataset['file_path'])
+        fp = dataset['file_path']
+        if fp and os.path.exists(fp):
+            os.remove(fp)
     except Exception:
         pass
 
@@ -423,8 +460,19 @@ def train(current_user):
     target_column = data.get('target_column', dataset['target_column'])
     compare = data.get('compare', False)
 
+    # --- Reconstruct DataFrame from stored compressed CSV bytes (no disk read) ---
     try:
-        df = load_dataset(dataset['file_path'])
+        raw_csv_bytes = dataset['csv_data']  # sqlite3 BLOB returns bytes
+        if not raw_csv_bytes:
+            conn.close()
+            return jsonify({'error': 'Dataset data not found in database. Please re-upload your dataset.'}), 400
+        csv_bytes = gzip.decompress(bytes(raw_csv_bytes))
+        df = load_dataset_from_bytes(csv_bytes, '.csv')
+    except Exception as e:
+        conn.close()
+        return jsonify({'error': f'Failed to load dataset: {str(e)}'}), 400
+
+    try:
         preprocessed = preprocess_data(df, target_column)
     except Exception as e:
         conn.close()
